@@ -34,6 +34,32 @@ exports.createUserRecord = functions.auth.user().onCreate(async (user) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
+// setDeviceId - Kullanıcının cihaz ID bilgisini güvenli şekilde kaydet (Gen 2)
+// ═══════════════════════════════════════════════════════════════
+exports.setDeviceId = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError(
+      "unauthenticated",
+      "Giriş yapmanız gerekiyor."
+    );
+  }
+
+  const { deviceId } = request.data || {};
+  if (typeof deviceId !== "string" || deviceId.length < 8 || deviceId.length > 128) {
+    throw new HttpsError(
+      "invalid-argument",
+      "Geçersiz deviceId."
+    );
+  }
+
+  await db.collection("Users").doc(request.auth.uid).set({
+    deviceId,
+  }, { merge: true });
+
+  return { success: true };
+});
+
+// ═══════════════════════════════════════════════════════════════
 // joinSession - Kullanıcı Katılım Cloud Function (Gen 2)
 // ═══════════════════════════════════════════════════════════════
 exports.joinSession = onCall(async (request) => {
