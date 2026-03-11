@@ -8,7 +8,8 @@ const db = admin.firestore();
 
 const ADMIN_EMAILS = [
   "talatozdemir00@gmail.com",
-  "mert.ytucev@gmail.com"
+  "mert.ytucev@gmail.com",
+  "ezgisayar0@gmail.com"
 ].map((email) => email.toLowerCase());
 
 function isAdminEmail(email) {
