@@ -1,3 +1,4 @@
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
 const { FieldValue } = require("firebase-admin/firestore");
@@ -25,23 +26,23 @@ exports.createUserRecord = functions.auth.user().onCreate(async (user) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// joinSession - Kullanıcı Katılım Cloud Function
+// joinSession - Kullanıcı Katılım Cloud Function (Gen 2)
 // ═══════════════════════════════════════════════════════════════
-exports.joinSession = functions.https.onCall(async (data, context) => {
+exports.joinSession = onCall(async (request) => {
   // 1. Auth kontrolü
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
+  if (!request.auth) {
+    throw new HttpsError(
       "unauthenticated",
       "Giriş yapmanız gerekiyor."
     );
   }
 
-  const userId = context.auth.uid;
-  const { sessionId } = data;
+  const userId = request.auth.uid;
+  const { sessionId } = request.data;
 
   // 2. Parametre validasyonu
   if (!sessionId) {
-    throw new functions.https.HttpsError(
+    throw new HttpsError(
       "invalid-argument",
       "sessionId gereklidir."
     );
@@ -54,7 +55,7 @@ exports.joinSession = functions.https.onCall(async (data, context) => {
   // 3. Oturum durumu kontrolü
   const sessionDoc = await sessionRef.get();
   if (!sessionDoc.exists) {
-    throw new functions.https.HttpsError(
+    throw new HttpsError(
       "not-found",
       "Oturum bulunamadı."
     );
@@ -67,7 +68,7 @@ exports.joinSession = functions.https.onCall(async (data, context) => {
       cancelled: "Bu oturum iptal edilmiş.",
       completed: "Bu oturum sonuçlanmış.",
     };
-    throw new functions.https.HttpsError(
+    throw new HttpsError(
       "failed-precondition",
       statusMessages[sessionStatus] || "Bu oturum şu anda aktif değil."
     );
@@ -83,7 +84,7 @@ exports.joinSession = functions.https.onCall(async (data, context) => {
     .get();
 
   if (!userCheck.empty) {
-    throw new functions.https.HttpsError(
+    throw new HttpsError(
       "already-exists",
       "Bu oturuma zaten katıldınız."
     );
@@ -97,7 +98,7 @@ exports.joinSession = functions.https.onCall(async (data, context) => {
       const userSnap = await transaction.get(userRef);
 
       if (sessionData.joinedCount >= sessionData.limit) {
-        throw new functions.https.HttpsError(
+        throw new HttpsError(
           "resource-exhausted",
           "Kontenjan doldu! Daha fazla katılımcı kabul edilmiyor."
         );
@@ -135,11 +136,11 @@ exports.joinSession = functions.https.onCall(async (data, context) => {
 
     return { success: true, message: "Başarıyla katıldınız!" };
   } catch (error) {
-    if (error instanceof functions.https.HttpsError) {
+    if (error instanceof HttpsError) {
       throw error;
     }
     console.error("Transaction hatası:", error);
-    throw new functions.https.HttpsError(
+    throw new HttpsError(
       "internal",
       "Bir hata oluştu, lütfen tekrar deneyin."
     );
@@ -147,29 +148,29 @@ exports.joinSession = functions.https.onCall(async (data, context) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// drawWinner - Ağırlıklı Çekiliş Cloud Function
+// drawWinner - Ağırlıklı Çekiliş Cloud Function (Gen 2)
 // ═══════════════════════════════════════════════════════════════
-exports.drawWinner = functions.https.onCall(async (data, context) => {
+exports.drawWinner = onCall(async (request) => {
   // 1. Auth kontrolü
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
+  if (!request.auth) {
+    throw new HttpsError(
       "unauthenticated",
       "Giriş yapmanız gerekiyor."
     );
   }
 
   // 2. Admin kontrolü
-  if ((context.auth.token.email || "").toLowerCase() !== ADMIN_EMAIL) {
-    throw new functions.https.HttpsError(
+  if ((request.auth.token.email || "").toLowerCase() !== ADMIN_EMAIL) {
+    throw new HttpsError(
       "permission-denied",
       "Bu işlem sadece admin tarafından yapılabilir."
     );
   }
 
-  const { sessionId } = data;
+  const { sessionId } = request.data;
 
   if (!sessionId) {
-    throw new functions.https.HttpsError(
+    throw new HttpsError(
       "invalid-argument",
       "sessionId gereklidir."
     );
@@ -182,7 +183,7 @@ exports.drawWinner = functions.https.onCall(async (data, context) => {
     .get();
 
   if (participationsSnap.empty) {
-    throw new functions.https.HttpsError(
+    throw new HttpsError(
       "not-found",
       "Bu oturumda hiç katılımcı yok."
     );
@@ -217,7 +218,7 @@ exports.drawWinner = functions.https.onCall(async (data, context) => {
   }
 
   if (weightedPool.length === 0) {
-    throw new functions.https.HttpsError(
+    throw new HttpsError(
       "internal",
       "Ağırlıklı havuz oluşturulamadı."
     );
@@ -250,29 +251,29 @@ exports.drawWinner = functions.https.onCall(async (data, context) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// cancelSession - Oturumu İptal Et ve Hakları Geri Ver
+// cancelSession - Oturumu İptal Et ve Hakları Geri Ver (Gen 2)
 // ═══════════════════════════════════════════════════════════════
-exports.cancelSession = functions.https.onCall(async (data, context) => {
+exports.cancelSession = onCall(async (request) => {
   // 1. Auth kontrolü
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
+  if (!request.auth) {
+    throw new HttpsError(
       "unauthenticated",
       "Giriş yapmanız gerekiyor."
     );
   }
 
   // 2. Admin kontrolü
-  if ((context.auth.token.email || "").toLowerCase() !== ADMIN_EMAIL) {
-    throw new functions.https.HttpsError(
+  if ((request.auth.token.email || "").toLowerCase() !== ADMIN_EMAIL) {
+    throw new HttpsError(
       "permission-denied",
       "Bu işlem sadece admin tarafından yapılabilir."
     );
   }
 
-  const { sessionId } = data;
+  const { sessionId } = request.data;
 
   if (!sessionId) {
-    throw new functions.https.HttpsError(
+    throw new HttpsError(
       "invalid-argument",
       "sessionId gereklidir."
     );
@@ -282,12 +283,12 @@ exports.cancelSession = functions.https.onCall(async (data, context) => {
   const sessionDoc = await sessionRef.get();
 
   if (!sessionDoc.exists) {
-    throw new functions.https.HttpsError("not-found", "Oturum bulunamadı.");
+    throw new HttpsError("not-found", "Oturum bulunamadı.");
   }
 
   const currentStatus = sessionDoc.data().status;
   if (currentStatus === "cancelled" || currentStatus === "completed") {
-    throw new functions.https.HttpsError(
+    throw new HttpsError(
       "failed-precondition",
       "Bu oturum zaten sonlandırılmış."
     );
