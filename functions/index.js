@@ -6,7 +6,14 @@ const { FieldValue } = require("firebase-admin/firestore");
 admin.initializeApp();
 const db = admin.firestore();
 
-const ADMIN_EMAIL = "talatozdemir00@gmail.com".toLowerCase();
+const ADMIN_EMAILS = [
+  "talatozdemir00@gmail.com",
+  "mert.ytucev@gmail.com"
+].map((email) => email.toLowerCase());
+
+function isAdminEmail(email) {
+  return ADMIN_EMAILS.includes((email || "").toLowerCase());
+}
 
 // ═══════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════
@@ -14,7 +21,7 @@ const ADMIN_EMAIL = "talatozdemir00@gmail.com".toLowerCase();
 // ═══════════════════════════════════════════════════════════════
 exports.createUserRecord = functions.auth.user().onCreate(async (user) => {
   const email = user.email || "";
-  const role = email.toLowerCase() === ADMIN_EMAIL ? "admin" : "user";
+  const role = isAdminEmail(email) ? "admin" : "user";
   
   await db.collection("Users").doc(user.uid).set({
     email: email,
@@ -127,7 +134,7 @@ exports.joinSession = onCall(async (request) => {
         transaction.set(userRef, {
           email: authUser.email || "",
           displayName: authUser.displayName || "Anonim",
-          role: (authUser.email || "").toLowerCase() === ADMIN_EMAIL ? "admin" : "user",
+          role: isAdminEmail(authUser.email) ? "admin" : "user",
           totalParticipations: 1,
           createdAt: FieldValue.serverTimestamp(),
         });
@@ -160,7 +167,7 @@ exports.drawWinner = onCall(async (request) => {
   }
 
   // 2. Admin kontrolü
-  if ((request.auth.token.email || "").toLowerCase() !== ADMIN_EMAIL) {
+  if (!isAdminEmail(request.auth.token.email)) {
     throw new HttpsError(
       "permission-denied",
       "Bu işlem sadece admin tarafından yapılabilir."
@@ -263,7 +270,7 @@ exports.cancelSession = onCall(async (request) => {
   }
 
   // 2. Admin kontrolü
-  if ((request.auth.token.email || "").toLowerCase() !== ADMIN_EMAIL) {
+  if (!isAdminEmail(request.auth.token.email)) {
     throw new HttpsError(
       "permission-denied",
       "Bu işlem sadece admin tarafından yapılabilir."
