@@ -31,11 +31,9 @@ if (window.location.hostname === "localhost" || window.location.hostname === "12
     functions.useEmulator(host, 5001);
 }
 
-// Admin email address (Forced to lowercase)
-const ADMIN_EMAIL = "talatozdemir00@gmail.com".toLowerCase();
 
 // ═══════════════════════════════════════════════════════════════
-// FingerprintJS - Device Fingerprint (Temporarily Removed)
+// FingerprintJS - Device Fingerprint
 // ═══════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════
@@ -47,6 +45,7 @@ function app() {
         isLoggedIn: false,
         isAdmin: false,
         user: null,
+        deviceId: null,
         currentSession: null,
         currentSessionId: null,
         joinedCount: 0,
@@ -68,6 +67,9 @@ function app() {
 
         // ─── Init ───
         async init() {
+            // Prepare device ID before anything else to ensure it's ready when the user logs in
+            await this.initDeviceId();
+
             // Listen for Firebase Auth state changes
             auth.onAuthStateChanged(async (user) => {
                 if (user) {
@@ -97,6 +99,9 @@ function app() {
                         console.error("Kullanıcı rolü alınamadı:", error);
                         this.isAdmin = false;
                     }
+
+                    // Save device ID through Cloud Function (client has no direct write permission)
+                    await this.saveDeviceIdToUser();
 
                     // Find and listen to the active session
                     this.listenForActiveSession();
@@ -137,6 +142,61 @@ function app() {
                 this.showToast("Çıkış yapıldı", "info");
             } catch (error) {
                 this.showToast("Çıkış yapılamadı", "error");
+            }
+        },
+
+        // ═══════════════════════════════════════════════════════════
+        // Device ID (FingerprintJS)
+        // ═══════════════════════════════════════════════════════════
+        async ensureFingerprintJsLoaded() {
+            if (window.FingerprintJS) return;
+
+            await new Promise((resolve, reject) => {
+                const existingScript = document.querySelector('script[data-fpjs="1"]');
+                if (existingScript) {
+                    existingScript.addEventListener("load", resolve, { once: true });
+                    existingScript.addEventListener("error", () => reject(new Error("FingerprintJS yüklenemedi")), { once: true });
+                    return;
+                }
+
+                const script = document.createElement("script");
+                script.src = "https://openfpcdn.io/fingerprintjs/v4";
+                script.async = true;
+                script.defer = true;
+                script.dataset.fpjs = "1";
+                script.onload = resolve;
+                script.onerror = () => reject(new Error("FingerprintJS yüklenemedi"));
+                document.head.appendChild(script);
+            });
+        },
+
+        async initDeviceId() {
+            try {
+                await this.ensureFingerprintJsLoaded();
+                const fp = await window.FingerprintJS.load();
+                const result = await fp.get();
+                this.deviceId = result.visitorId;
+                console.log("✅ Device ID hazır:", this.deviceId);
+            } catch (error) {
+                console.warn("FingerprintJS hatası, fallback ID kullanılıyor:", error);
+                const KEY = "raffle_device_id_v1";
+                let id = localStorage.getItem(KEY);
+                if (!id) {
+                    id = window.crypto?.randomUUID?.() || `dev_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+                    localStorage.setItem(KEY, id);
+                }
+                this.deviceId = id;
+            }
+        },
+
+        async saveDeviceIdToUser() {
+            if (!this.deviceId || !auth.currentUser) return;
+            try {
+                const setDeviceId = functions.httpsCallable("setDeviceId");
+                await setDeviceId({ deviceId: this.deviceId });
+                console.log("✅ Device ID Cloud Function ile kaydedildi.");
+            } catch (error) {
+                console.error("Device ID kaydedilemedi:", error);
             }
         },
 
