@@ -4,7 +4,12 @@ service cloud.firestore {
 
     // ─── Yardımcı Fonksiyon: Admin kontrolü ───
     function isAdmin() {
-      return request.auth != null && request.auth.token.email == 'talatozdemir00@gmail.com';
+      return request.auth != null &&
+        request.auth.token.email in [
+          'talatozdemir00@gmail.com',
+          'mert.ytucev@gmail.com',
+          'ezgisayar0@gmail.com'
+        ];
     }
 
     // ─── Sessions Koleksiyonu ───

@@ -31,8 +31,6 @@ if (window.location.hostname === "localhost" || window.location.hostname === "12
     functions.useEmulator(host, 5001);
 }
 
-// Admin email address (Forced to lowercase)
-const ADMIN_EMAIL = "talatozdemir00@gmail.com".toLowerCase();
 
 // ═══════════════════════════════════════════════════════════════
 // FingerprintJS - Device Fingerprint (Temporarily Removed)
