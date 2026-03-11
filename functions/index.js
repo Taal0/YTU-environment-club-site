@@ -38,23 +38,32 @@ exports.createUserRecord = functions.auth.user().onCreate(async (user) => {
 // ═══════════════════════════════════════════════════════════════
 exports.setDeviceId = onCall(async (request) => {
   if (!request.auth) {
-    throw new HttpsError(
-      "unauthenticated",
-      "Giriş yapmanız gerekiyor."
-    );
+    throw new HttpsError("unauthenticated", "Giriş yapmanız gerekiyor.");
   }
 
   const { deviceId } = request.data || {};
   if (typeof deviceId !== "string" || deviceId.length < 8 || deviceId.length > 128) {
-    throw new HttpsError(
-      "invalid-argument",
-      "Geçersiz deviceId."
-    );
+    throw new HttpsError("invalid-argument", "Geçersiz deviceId.");
   }
 
-  await db.collection("Users").doc(request.auth.uid).set({
-    deviceId,
-  }, { merge: true });
+  const uid = request.auth.uid;
+  const userRef = db.collection("Users").doc(uid);
+  const lockRef = db.collection("DeviceLocks").doc(deviceId);
+
+  await db.runTransaction(async (tx) => {
+    const lockSnap = await tx.get(lockRef);
+
+    if (!lockSnap.exists) {
+      tx.set(lockRef, { uid });
+    } else if (lockSnap.data().uid !== uid) {
+      throw new HttpsError(
+        "already-exists",
+        "Bu cihaz daha önce farklı bir hesapla kullanılmış. Her cihaz yalnızca bir hesapla katılabilir."
+      );
+    }
+
+    tx.set(userRef, { deviceId }, { merge: true });
+  });
 
   return { success: true };
 });

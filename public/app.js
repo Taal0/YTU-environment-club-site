@@ -196,7 +196,14 @@ function app() {
                 await setDeviceId({ deviceId: this.deviceId });
                 console.log("✅ Device ID Cloud Function ile kaydedildi.");
             } catch (error) {
-                console.error("Device ID kaydedilemedi:", error);
+                const code = error?.code || "";
+                if (code.includes("already-exists")) {
+                    this.showToast("Bu cihaz daha önce farklı bir hesapla kullanılmış. Her cihaz yalnızca bir hesapla katılabilir.", "error");
+                    await new Promise(resolve => setTimeout(resolve, 3000)); // wait for the user to read the message
+                    await auth.signOut();
+                    return;
+                }
+                console.error("❌ Device ID kaydedilemedi:", error);
             }
         },
 
