@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="tr" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sadakat Çekilişi - Canlı Etkinlik</title>
+    <meta name="description"
+        content="Firebase tabanlı canlı etkinlik çekiliş uygulaması. Google ile giriş yapın ve şansınızı deneyin!">
+
+    <!-- TailwindCSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: { 50: '#f0f9ff', 100: '#e0f2fe', 200: '#bae6fd', 300: '#7dd3fc', 400: '#38bdf8', 500: '#0ea5e9', 600: '#0284c7', 700: '#0369a1', 800: '#075985', 900: '#0c4a6e' },
+                        accent: { 400: '#a78bfa', 500: '#8b5cf6', 600: '#7c3aed' },
+                        surface: { 800: '#1e1b2e', 900: '#13111c', 950: '#0c0a14' }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                        display: ['Outfit', 'system-ui', 'sans-serif'],
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'float': 'float 6s ease-in-out infinite',
+                        'glow': 'glow 2s ease-in-out infinite alternate',
+                        'slide-up': 'slideUp 0.5s ease-out',
+                        'fade-in': 'fadeIn 0.3s ease-out',
+                        'bounce-in': 'bounceIn 0.6s ease-out',
+                        'confetti': 'confetti 1s ease-out forwards',
+                        'shimmer': 'shimmer 2s linear infinite',
+                    },
+                    keyframes: {
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0)' },
+                            '50%': { transform: 'translateY(-10px)' },
+                        },
+                        glow: {
+                            '0%': { boxShadow: '0 0 20px rgba(139, 92, 246, 0.3)' },
+                            '100%': { boxShadow: '0 0 40px rgba(139, 92, 246, 0.6), 0 0 80px rgba(139, 92, 246, 0.2)' },
+                        },
+                        slideUp: {
+                            '0%': { opacity: '0', transform: 'translateY(20px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' },
+                        },
+                        bounceIn: {
+                            '0%': { opacity: '0', transform: 'scale(0.3)' },
+                            '50%': { transform: 'scale(1.05)' },
+                            '70%': { transform: 'scale(0.95)' },
+                            '100%': { opacity: '1', transform: 'scale(1)' },
+                        },
+                        confetti: {
+                            '0%': { transform: 'translateY(0) rotate(0deg)', opacity: '1' },
+                            '100%': { transform: 'translateY(-200px) rotate(720deg)', opacity: '0' },
+                        },
+                        shimmer: {
+                            '0%': { backgroundPosition: '-200% 0' },
+                            '100%': { backgroundPosition: '200% 0' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&display=swap"
+        rel="stylesheet">
+
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <!-- QRCode.js (Reliable CDN) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.1/qrcode.min.js"></script>
+
+    <!-- Firebase SDK (Compat) -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-functions-compat.js"></script>
+
+    <style>
+        /* ── Genel Stiller ── */
+        body {
+            background: linear-gradient(135deg, #0c0a14 0%, #13111c 40%, #1e1b2e 100%);
+            min-height: 100vh;
+        }
+
+        /* ── Glassmorphism kartlar ── */
+        .glass-card {
+            background: rgba(30, 27, 46, 0.6);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(139, 92, 246, 0.15);
+        }
+
+        .glass-card-light {
+            background: rgba(139, 92, 246, 0.08);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(139, 92, 246, 0.1);
+        }
+
+        /* ── Büyük KATIL butonu ── */
+        .join-btn {
+            background: linear-gradient(135deg, #7c3aed, #0ea5e9);
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .join-btn::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 60%);
+            transform: rotate(45deg);
+            transition: transform 0.6s;
+        }
+
+        .join-btn:hover::before {
+            transform: rotate(45deg) translateX(20%);
+        }
+
+        .join-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 40px rgba(124, 58, 237, 0.5), 0 0 80px rgba(14, 165, 231, 0.2);
+        }
+
+        .join-btn:active {
+            transform: scale(0.98);
+        }
+
+        .join-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        /* ── Google giriş butonu ── */
+        .google-btn {
+            background: linear-gradient(135deg, #4285f4, #34a853);
+            transition: all 0.3s ease;
+        }
+
+        .google-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(66, 133, 244, 0.3);
+        }
+
+        /* ── Admin butonları ── */
+        .admin-btn {
+            transition: all 0.3s ease;
+        }
+
+        .admin-btn:hover {
+            transform: translateY(-1px);
+        }
+
+        /* ── Progress bar ── */
+        .progress-bar {
+            background: linear-gradient(90deg, #7c3aed, #0ea5e9, #7c3aed);
+            background-size: 200% 100%;
+            animation: shimmer 2s linear infinite;
+        }
+
+        /* ── Arka plan parçacıkları ── */
+        .bg-particle {
+            position: fixed;
+            border-radius: 50%;
+            pointer-events: none;
+            opacity: 0.15;
+        }
+
+        /* ── Scroll bar ── */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #13111c;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #7c3aed;
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #8b5cf6;
+        }
+
+        /* ── Kazanan modal ── */
+        .winner-overlay {
+            background: rgba(12, 10, 20, 0.9);
+            backdrop-filter: blur(10px);
+        }
+
+        /* ── Notification toast ── */
+        .toast {
+            animation: slideUp 0.4s ease-out, fadeIn 0.4s ease-out;
+        }
+
+        /* ── Katılımcı listesi ── */
+        .participant-item {
+            transition: all 0.2s ease;
+        }
+
+        .participant-item:hover {
+            background: rgba(139, 92, 246, 0.15);
+            transform: translateX(4px);
+        }
+
+        [x-cloak] {
+            display: none !important;
+        }
+    </style>
+</head>
+
+<body class="font-sans text-gray-100 antialiased overflow-x-hidden" x-data="app()" x-init="init()" x-cloak>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- Arka Plan Parçacıkları                 -->
+    <!-- ═══════════════════════════════════════ -->
+    <div class="fixed inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+        <div class="bg-particle w-96 h-96 bg-accent-600/20 top-[-10%] left-[-5%] animate-float"
+            style="animation-delay: 0s;"></div>
+        <div class="bg-particle w-72 h-72 bg-primary-500/20 bottom-[-5%] right-[-5%] animate-float"
+            style="animation-delay: 2s;"></div>
+        <div class="bg-particle w-48 h-48 bg-accent-400/10 top-1/2 left-1/3 animate-float" style="animation-delay: 4s;">
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- Toast Bildirimleri                     -->
+    <!-- ═══════════════════════════════════════ -->
+    <div class="fixed top-6 right-6 z-50 space-y-3" id="toast-container">
+        <template x-for="(toast, index) in toasts" :key="index">
+            <div class="toast glass-card rounded-xl px-5 py-4 max-w-sm shadow-2xl flex items-center gap-3" :class="{
+                    'border-green-500/30': toast.type === 'success',
+                    'border-red-500/30': toast.type === 'error',
+                    'border-amber-500/30': toast.type === 'warning',
+                    'border-primary-500/30': toast.type === 'info'
+                 }">
+                <span class="text-xl"
+                    x-text="toast.type === 'success' ? '✅' : toast.type === 'error' ? '❌' : toast.type === 'warning' ? '⚠️' : 'ℹ️'"></span>
+                <p class="text-sm font-medium" x-text="toast.message"></p>
+            </div>
+        </template>
+    </div>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- NAV BAR                                -->
+    <!-- ═══════════════════════════════════════ -->
+    <nav class="fixed top-0 left-0 right-0 z-40 glass-card border-b border-accent-600/10">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div
+                    class="w-10 h-10 rounded-xl bg-gradient-to-br from-accent-500 to-primary-500 flex items-center justify-center text-white font-display font-bold text-lg shadow-lg">
+                    Ç
+                </div>
+                <div>
+                    <h1
+                        class="font-display font-bold text-lg bg-gradient-to-r from-accent-400 to-primary-400 bg-clip-text text-transparent">
+                        Sadakat Çekilişi
+                    </h1>
+                    <p class="text-xs text-gray-500" x-show="isLoggedIn"
+                        x-text="isAdmin ? '👑 Admin Paneli' : '🎯 Katılımcı'"></p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3" x-show="isLoggedIn">
+                <div class="hidden sm:flex items-center gap-2 glass-card-light rounded-full px-4 py-2">
+                    <img :src="user?.photoURL || 'https://ui-avatars.com/api/?name=U&background=7c3aed&color=fff'"
+                        class="w-7 h-7 rounded-full border-2 border-accent-500/30" alt="Profil">
+                    <span class="text-sm font-medium text-gray-300" x-text="user?.displayName || 'Kullanıcı'"></span>
+                </div>
+                <button @click="signOut()"
+                    class="admin-btn bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl px-4 py-2 text-sm font-medium border border-red-500/20"
+                    id="btn-signout">
+                    Çıkış
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- ANA İÇERİK                            -->
+    <!-- ═══════════════════════════════════════ -->
+    <main class="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 pt-24 pb-12">
+
+        <!-- ─── GİRİŞ EKRANI ─── -->
+        <div x-show="!isLoggedIn" class="flex flex-col items-center justify-center min-h-[70vh] animate-fade-in"
+            id="login-screen">
+            <div class="text-center mb-12">
+                <div
+                    class="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-accent-500 to-primary-500 flex items-center justify-center animate-float shadow-2xl">
+                    <span class="text-5xl">🎰</span>
+                </div>
+                <h2 class="font-display font-extrabold text-4xl sm:text-5xl mb-4">
+                    <span
+                        class="bg-gradient-to-r from-accent-400 via-primary-400 to-accent-400 bg-clip-text text-transparent">
+                        Sadakat Çekilişi
+                    </span>
+                </h2>
+                <p class="text-gray-400 text-lg max-w-md mx-auto">
+                    Canlı etkinliklere katılın, sadakatinizle şansınızı artırın!
+                </p>
+            </div>
+
+            <button @click="signInWithGoogle()"
+                class="google-btn rounded-2xl px-8 py-4 text-white font-semibold text-lg flex items-center gap-3 shadow-xl"
+                id="btn-google-login">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                    <path
+                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
+                        fill="#fff" />
+                    <path
+                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                        fill="#fff" opacity=".8" />
+                    <path
+                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                        fill="#fff" opacity=".6" />
+                    <path
+                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                        fill="#fff" opacity=".4" />
+                </svg>
+                Google ile Giriş Yap
+            </button>
+        </div>
+
+        <!-- ─── KULLANICI EKRANI (Giriş yapılmış) ─── -->
+        <div x-show="isLoggedIn && !isAdmin" class="animate-slide-up" id="user-screen">
+
+            <!-- Aktif oturum yoksa -->
+            <div x-show="!currentSession" class="flex flex-col items-center justify-center min-h-[60vh]">
+                <div class="glass-card rounded-3xl p-12 text-center max-w-lg">
+                    <div class="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gray-800 flex items-center justify-center">
+                        <span class="text-4xl">⏳</span>
+                    </div>
+                    <h3 class="font-display font-bold text-2xl mb-3 text-gray-200">Aktif Oturum Yok</h3>
+                    <p class="text-gray-400">Şu anda aktif bir çekiliş oturumu bulunmuyor. Lütfen etkinlik başladığında
+                        tekrar kontrol edin.</p>
+                </div>
+            </div>
+
+            <!-- Aktif oturum varsa -->
+            <div x-show="currentSession" class="space-y-6">
+                <!-- Kontenjan kartı -->
+                <div class="glass-card rounded-3xl p-8 text-center animate-bounce-in">
+                    <p class="text-sm text-gray-400 mb-2 font-medium uppercase tracking-wider">Canlı Kontenjan</p>
+                    <div class="flex items-center justify-center gap-2 mb-4">
+                        <span
+                            class="font-display font-extrabold text-6xl bg-gradient-to-r from-accent-400 to-primary-400 bg-clip-text text-transparent"
+                            x-text="joinedCount"></span>
+                        <span class="text-2xl text-gray-500 font-display font-bold">/</span>
+                        <span class="font-display font-bold text-3xl text-gray-400"
+                            x-text="currentSession?.limit || 0"></span>
+                    </div>
+
+                    <!-- Hediye Gösterimi -->
+                    <div x-show="currentSession?.prize" class="mb-5 inline-block mx-auto bg-gradient-to-r from-primary-500/20 to-accent-500/20 border border-primary-500/30 rounded-xl px-4 py-2">
+                        <span class="text-primary-400 font-bold uppercase text-xs tracking-wider block mb-1">Kazanılacak Hediye</span>
+                        <span class="text-white font-display text-xl" x-text="currentSession?.prize"></span>
+                    </div>
+
+                    <!-- Progress bar -->
+                    <div class="w-full bg-gray-800 rounded-full h-3 mb-2 overflow-hidden">
+                        <div class="progress-bar h-3 rounded-full transition-all duration-500 ease-out"
+                            :style="'width:' + Math.min(100, (joinedCount / (currentSession?.limit || 1)) * 100) + '%'">
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-500">
+                        <span x-text="Math.max(0, (currentSession?.limit || 0) - joinedCount)"></span> kişilik yer kaldı
+                    </p>
+                </div>
+
+                <!-- KATIL Butonu -->
+                <div class="flex justify-center">
+                    <button @click="joinCurrentSession()"
+                        :disabled="userStatus === 'joined' || userStatus === 'joining' || joinedCount >= (currentSession?.limit || 0) || currentSession?.status !== 'active'"
+                        class="join-btn rounded-3xl px-16 py-6 text-white font-display font-bold text-2xl shadow-2xl animate-glow"
+                        :class="{ 'animate-glow': userStatus !== 'joined' }" id="btn-join">
+                        <span x-show="userStatus === 'idle'">🎯 KATIL</span>
+                        <span x-show="userStatus === 'joining'" class="flex items-center gap-3">
+                            <svg class="animate-spin h-6 w-6" viewBox="0 0 24 24">
+                                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"
+                                    opacity="0.25"></circle>
+                                <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                            </svg>
+                            Katılınıyor...
+                        </span>
+                        <span x-show="userStatus === 'joined'" class="flex items-center gap-3">✅ Katıldınız!</span>
+                    </button>
+                </div>
+
+                <!-- Duraklatılmış oturum uyarısı -->
+                <div x-show="currentSession?.status === 'paused'"
+                    class="glass-card-light rounded-2xl p-6 text-center animate-slide-up border border-amber-500/20 mb-4">
+                    <p class="text-amber-400 font-semibold text-lg">⏸ Oturum Duraklatıldı</p>
+                    <p class="text-gray-400 text-sm mt-1">Bu çekiliş şu anda duraklatılmış durumda. Lütfen bekleyin.</p>
+                </div>
+
+                <!-- Durum mesajı -->
+                <div x-show="userStatus === 'joined'"
+                    class="glass-card-light rounded-2xl p-6 text-center animate-slide-up">
+                    <p class="text-green-400 font-semibold text-lg">🎉 Çekilişe başarıyla katıldınız!</p>
+                    <p class="text-gray-400 text-sm mt-1">Kazanan açıklanana kadar bekleyin. İyi şanslar!</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ─── ADMİN PANELİ ─── -->
+        <div x-show="isLoggedIn && isAdmin" class="space-y-6 animate-slide-up" id="admin-screen">
+
+            <!-- Admin Başlık -->
+            <div class="glass-card rounded-3xl p-6 flex items-center gap-4">
+                <div
+                    class="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg">
+                    <span class="text-3xl">👑</span>
+                </div>
+                <div>
+                    <h2 class="font-display font-bold text-2xl text-white">Yönetim Paneli</h2>
+                    <p class="text-gray-400 text-sm">Oturum oluştur, yönet ve çekiliş yap</p>
+                </div>
+            </div>
+
+            <!-- Oturum Kontrolleri -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                <!-- Sol: Oturum Yönetimi -->
+                <div class="glass-card rounded-3xl p-6 space-y-5">
+                    <h3 class="font-display font-bold text-lg text-gray-200 flex items-center gap-2">
+                        <span>⚙️</span> Oturum Yönetimi
+                    </h3>
+
+                    <!-- Yeni oturum oluştur -->
+                    <div x-show="!currentSession" class="space-y-4">
+                        <div>
+                            <label class="text-sm text-gray-400 font-medium mb-1 block">Katılımcı Limiti</label>
+                            <input type="number" x-model.number="sessionLimit"
+                                class="w-full bg-gray-900/50 border border-gray-700 rounded-xl px-4 py-3 text-white focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/20 transition-all mb-3"
+                                placeholder="Örn: 200" min="1" max="1000" id="input-session-limit">
+                            
+                            <label class="text-sm text-gray-400 font-medium mb-1 block">Hediye (Opsiyonel)</label>
+                            <input type="text" x-model="sessionPrize"
+                                class="w-full bg-gray-900/50 border border-gray-700 rounded-xl px-4 py-3 text-white focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/20 transition-all"
+                                placeholder="Örn: 1 Aylık Netflix veya 200 TL Çek" id="input-session-prize">
+                        </div>
+                        <button @click="createSession()"
+                            class="admin-btn w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white rounded-xl px-6 py-3 font-semibold shadow-lg"
+                            id="btn-create-session">
+                            🚀 Oturumu Başlat
+                        </button>
+                    </div>
+
+                    <!-- Aktif oturum varsa -->
+                    <div x-show="currentSession" class="space-y-4">
+                        <div class="glass-card-light rounded-xl p-4 space-y-2">
+                            <div class="flex justify-between text-sm">
+                                <span class="text-gray-400">Durum</span>
+                                <span class="font-semibold"
+                                    :class="{
+                                        'text-green-400': currentSession?.status === 'active',
+                                        'text-amber-400': currentSession?.status === 'paused',
+                                        'text-red-400': currentSession?.status === 'cancelled',
+                                        'text-blue-400': currentSession?.status === 'completed'
+                                    }"
+                                    x-text="{
+                                        active: '🟢 Aktif',
+                                        paused: '🟡 Duraklatıldı',
+                                        cancelled: '🔴 İptal Edildi',
+                                        completed: '🏆 Tamamlandı'
+                                    }[currentSession?.status] || '❓ Bilinmiyor'"></span>
+                            </div>
+                            <div class="flex justify-between text-sm">
+                                <span class="text-gray-400">Kontenjan</span>
+                                <span class="text-white font-semibold">
+                                    <span x-text="joinedCount"></span> / <span x-text="currentSession?.limit"></span>
+                                </span>
+                            </div>
+                            <div class="flex justify-between text-sm">
+                                <span class="text-gray-400">Oturum ID</span>
+                                <span class="text-gray-500 text-xs font-mono"
+                                    x-text="currentSessionId?.substring(0,12) + '...'"></span>
+                            </div>
+                            <div class="flex justify-between text-sm pt-2 border-t border-gray-700/50" x-show="currentSession?.prize">
+                                <span class="text-accent-400 font-medium">Hediye:</span>
+                                <span class="text-white font-medium" x-text="currentSession?.prize"></span>
+                            </div>
+                        </div>
+
+                        <!-- Progress bar -->
+                        <div class="w-full bg-gray-800 rounded-full h-2 overflow-hidden">
+                            <div class="progress-bar h-2 rounded-full transition-all duration-500"
+                                :style="'width:' + Math.min(100, (joinedCount / (currentSession?.limit || 1)) * 100) + '%'">
+                            </div>
+                        </div>
+
+                        <div class="flex gap-3">
+                            <!-- Duraklat / Devam Et -->
+                            <button @click="pauseSession()"
+                                class="admin-btn flex-1 rounded-xl px-4 py-3 font-semibold shadow-lg text-white"
+                                :class="currentSession?.status === 'active' 
+                                    ? 'bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500' 
+                                    : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500'"
+                                x-show="currentSession?.status === 'active' || currentSession?.status === 'paused'"
+                                id="btn-pause-session">
+                                <span x-text="currentSession?.status === 'active' ? '⏸ Duraklat' : '▶ Devam Et'"></span>
+                            </button>
+
+                            <!-- İptal Et -->
+                            <button @click="cancelSession()"
+                                class="admin-btn flex-1 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white rounded-xl px-4 py-3 font-semibold shadow-lg"
+                                x-show="currentSession?.status === 'active' || currentSession?.status === 'paused'"
+                                id="btn-cancel-session">
+                                🚫 İptal Et
+                            </button>
+
+                            <!-- Çekilişi Yap -->
+                            <button @click="drawRaffle()" :disabled="isDrawing"
+                                class="admin-btn flex-1 bg-gradient-to-r from-accent-600 to-primary-600 hover:from-accent-500 hover:to-primary-500 text-white rounded-xl px-4 py-3 font-semibold shadow-lg disabled:opacity-50"
+                                id="btn-draw-raffle">
+                                <span x-show="!isDrawing">🎰 Çekilişi Yap</span>
+                                <span x-show="isDrawing" class="flex items-center justify-center gap-2">
+                                    <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                                        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none" opacity="0.25"></circle>
+                                        <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                    </svg>
+                                    Çekiliyor...
+                                </span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sağ: QR Kod -->
+                <div class="glass-card rounded-3xl p-6 flex flex-col items-center justify-center"
+                    x-show="currentSession">
+                    <h3 class="font-display font-bold text-lg text-gray-200 mb-4 flex items-center gap-2">
+                        <span>📱</span> Katılım QR Kodu
+                    </h3>
+                    <div id="qrcode-container" class="bg-white rounded-2xl p-4 shadow-2xl"></div>
+                    <p class="text-xs text-gray-500 mt-3 text-center">Bu QR kodu ekranda göstererek<br>katılımcıların
+                        giriş yapmasını sağlayın</p>
+                </div>
+            </div>
+
+            <!-- Katılımcı Listesi -->
+            <div class="glass-card rounded-3xl p-6" x-show="currentSession">
+                <h3 class="font-display font-bold text-lg text-gray-200 mb-4 flex items-center gap-2">
+                    <span>👥</span> Katılımcılar
+                    <span class="text-sm font-normal text-gray-500">(<span x-text="participants.length"></span>
+                        kişi)</span>
+                </h3>
+
+                <div x-show="participants.length === 0" class="text-center py-8 text-gray-500">
+                    <span class="text-3xl block mb-2">🦗</span>
+                    Henüz katılımcı yok
+                </div>
+
+                <div class="space-y-2 max-h-80 overflow-y-auto pr-2" x-show="participants.length > 0">
+                    <template x-for="(p, i) in participants" :key="p.id">
+                        <div class="participant-item flex items-center gap-3 rounded-xl px-4 py-3">
+                            <span class="text-sm font-mono text-gray-600 w-8" x-text="(i + 1) + '.'"></span>
+                            <div class="w-8 h-8 rounded-full bg-gradient-to-br from-accent-500 to-primary-500 flex items-center justify-center text-xs font-bold text-white"
+                                x-text="(p.displayName || 'A').charAt(0).toUpperCase()"></div>
+                            <div class="flex-1 min-w-0">
+                                <p class="text-sm font-medium text-gray-200 truncate"
+                                    x-text="p.displayName || 'Anonim'"></p>
+                                <p class="text-xs text-gray-500 truncate" x-text="p.email || ''"></p>
+                            </div>
+                            <span class="text-xs text-gray-600 font-mono" x-text="formatTime(p.timestamp)"></span>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <!-- ─── GEÇMİŞ ÇEKİLİŞLER (Herkes görebilir) ─── -->
+        <div x-show="isLoggedIn && pastSessions.length > 0" class="mt-12 animate-slide-up">
+            <h3 class="font-display font-bold text-2xl text-white mb-6 flex items-center gap-3">
+                <span>📜</span> Geçmiş Çekilişler
+            </h3>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <template x-for="session in pastSessions" :key="session.id">
+                    <div class="glass-card rounded-2xl p-6 relative overflow-hidden group hover:border-accent-500/30 transition-colors">
+                        <!-- Status Badge -->
+                        <div class="absolute top-4 right-4 px-3 py-1 rounded-full text-xs font-bold"
+                             :class="{
+                                 'bg-blue-500/20 text-blue-400': session.status === 'completed',
+                                 'bg-red-500/20 text-red-400': session.status === 'cancelled',
+                                 'bg-gray-500/20 text-gray-400': session.status === 'closed'
+                             }">
+                            <span x-text="{ completed: 'Tamamlandı', cancelled: 'İptal Edildi', closed: 'Kapatıldı' }[session.status] || session.status"></span>
+                        </div>
+                        
+                        <p class="text-xs text-gray-500 font-mono mb-4" x-text="formatTime(session.createdAt) + ' Tarihli Çekiliş'"></p>
+                        
+                        <!-- Prize Display -->
+                        <div x-show="session.prize" class="mb-4">
+                            <p class="text-xs text-accent-400 uppercase tracking-wider font-semibold mb-1">Hediye</p>
+                            <p class="text-lg font-display text-white" x-text="session.prize"></p>
+                        </div>
+                        <div x-show="!session.prize" class="mb-4">
+                            <p class="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">Hediye</p>
+                            <p class="text-lg font-display text-gray-400 italic">Belirtilmedi</p>
+                        </div>
+                        
+                        <!-- Winner Segment -->
+                        <div x-show="session.status === 'completed'" class="mt-4 pt-4 border-t border-gray-800">
+                            <p class="text-xs text-green-400 uppercase tracking-wider font-semibold mb-1">Kazanan</p>
+                            <div class="flex items-center gap-2">
+                                <span class="text-xl">🏆</span>
+                                <span class="font-medium text-white" x-text="session.winnerName || 'Bilinmiyor'"></span>
+                            </div>
+                        </div>
+
+                        <!-- Cancel/Closed Segment -->
+                        <div x-show="session.status !== 'completed'" class="mt-4 pt-4 border-t border-gray-800">
+                            <p class="text-sm text-gray-500" x-show="session.status === 'cancelled'">Biletler iptal edildi.</p>
+                            <p class="text-sm text-gray-500" x-show="session.status === 'closed'">Çekiliş yapılmadan kapatıldı.</p>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- KAZANAN MODAL                          -->
+    <!-- ═══════════════════════════════════════ -->
+    <div x-show="winner" x-transition.opacity class="fixed inset-0 z-50 flex items-center justify-center winner-overlay"
+        @click.self="winner = null" id="winner-modal">
+        <div class="glass-card rounded-3xl p-10 max-w-md w-full mx-4 text-center animate-bounce-in shadow-2xl border-accent-500/30"
+            x-show="winner" x-transition>
+            <div class="text-6xl mb-4">🏆</div>
+            <h3 class="font-display font-extrabold text-3xl text-white mb-2">Kazanan!</h3>
+            <div
+                class="my-6 p-4 rounded-2xl bg-gradient-to-r from-accent-600/20 to-primary-600/20 border border-accent-500/20">
+                <p class="font-display font-bold text-2xl text-accent-400" x-text="winner?.displayName || 'Anonim'"></p>
+                <p class="text-gray-400 text-sm mt-1" x-text="winner?.email || ''"></p>
+            </div>
+            <div class="flex justify-center gap-6 text-sm text-gray-400 mb-6">
+                <div>
+                    <p class="font-bold text-white text-lg" x-text="winner?.totalParticipations || 0"></p>
+                    <p>Toplam Katılım</p>
+                </div>
+                <div>
+                    <p class="font-bold text-white text-lg" x-text="winnerPoolSize || 0"></p>
+                    <p>Havuz Büyüklüğü</p>
+                </div>
+                <div>
+                    <p class="font-bold text-white text-lg" x-text="winnerUniqueCount || 0"></p>
+                    <p>Toplam Katılımcı</p>
+                </div>
+            </div>
+            <button @click="winner = null"
+                class="admin-btn bg-accent-600 hover:bg-accent-500 text-white rounded-xl px-8 py-3 font-semibold">
+                Kapat
+            </button>
+        </div>
+    </div>
+
+    <!-- Uygulama JS -->
+    <script src="app.js"></script>
+</body>
+
+</html>
