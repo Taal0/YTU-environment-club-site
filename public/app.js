@@ -42,6 +42,7 @@ if (window.location.hostname === "localhost" || window.location.hostname === "12
 function app() {
     return {
         // ─── State ───
+        authReady: false,
         isLoggedIn: false,
         isAdmin: false,
         user: null,
@@ -65,6 +66,10 @@ function app() {
         _participantsListener: null,
         _pastSessionsListener: null,
 
+        // Performance: participant user cache & session dedup
+        _userCache: {},
+        _lastCheckedSessionId: null,
+
         // ─── Init ───
         async init() {
             // Prepare device ID before anything else to ensure it's ready when the user logs in
@@ -72,36 +77,29 @@ function app() {
 
             // Listen for Firebase Auth state changes
             auth.onAuthStateChanged(async (user) => {
+                this.authReady = false;
+
                 if (user) {
                     this.user = user;
                     this.isLoggedIn = true;
-                    
-                    // Check Admin privileges from the database (with retry as a race condition prevention)
+
+                    // Resolve role + ensure Users/{uid} exists in a single backend call
                     try {
-                        let retries = 0;
-                        const maxRetries = 5;
-                        let userDoc = null;
-                        
-                        while (retries < maxRetries) {
-                            userDoc = await db.collection("Users").doc(user.uid).get();
-                            if (userDoc.exists) break;
-                            retries++;
-                            // Wait 1 second to wait for the collection to be created
-                            await new Promise(resolve => setTimeout(resolve, 1000));
-                        }
-                        
-                        if (userDoc && userDoc.exists && userDoc.data().role === "admin") {
-                            this.isAdmin = true;
-                        } else {
-                            this.isAdmin = false;
-                        }
+                        const bootstrapAuth = functions.httpsCallable("bootstrapAuth");
+                        const result = await bootstrapAuth();
+                        this.isAdmin = !!result?.data?.isAdmin;
                     } catch (error) {
-                        console.error("Kullanıcı rolü alınamadı:", error);
+                        console.error("Bootstrap auth hatası:", error);
+                        this.showToast("Oturum bilgileri alınamadı, kullanıcı modu ile devam ediliyor.", "warning");
                         this.isAdmin = false;
                     }
 
                     // Save device ID through Cloud Function (client has no direct write permission)
                     await this.saveDeviceIdToUser();
+
+                    // Reset caches on login
+                    this._userCache = {};
+                    this._lastCheckedSessionId = null;
 
                     // Find and listen to the active session
                     this.listenForActiveSession();
@@ -113,8 +111,12 @@ function app() {
                     this.user = null;
                     this.currentSession = null;
                     this.currentSessionId = null;
+                    this._userCache = {};
+                    this._lastCheckedSessionId = null;
                     this.cleanupListeners();
                 }
+
+                this.authReady = true;
             });
         },
 
@@ -222,22 +224,25 @@ function app() {
                 .onSnapshot((snapshot) => {
                     if (!snapshot.empty) {
                         const doc = snapshot.docs[0];
+                        const prevSessionId = this.currentSessionId;
                         this.currentSession = doc.data();
                         this.currentSessionId = doc.id;
                         this.joinedCount = this.currentSession.joinedCount || 0;
 
-                        // Katılımcı listesini dinle (admin için)
-                        if (this.isAdmin) {
+                        // Katılımcı listesini dinle (admin için) — sadece session değişince
+                        if (this.isAdmin && doc.id !== prevSessionId) {
                             this.listenForParticipants(doc.id);
                         }
 
                         // Kullanıcının bu oturuma katılıp katılmadığını kontrol et
-                        if (!this.isAdmin && this.user) {
+                        // Sadece session değiştiğinde sorgula (joinedCount artışında tekrar sorgulamayı engelle)
+                        if (!this.isAdmin && this.user && doc.id !== this._lastCheckedSessionId) {
+                            this._lastCheckedSessionId = doc.id;
                             this.checkUserParticipation(doc.id);
                         }
 
-                        // QR kodu güncelle
-                        if (this.isAdmin) {
+                        // QR kodu güncelle — sadece session değişince
+                        if (this.isAdmin && doc.id !== prevSessionId) {
                             this.$nextTick(() => this.generateQR());
                         }
                     } else {
@@ -260,29 +265,41 @@ function app() {
                 .where("sessionId", "==", sessionId)
                 .orderBy("timestamp", "desc")
                 .onSnapshot(async (snapshot) => {
-                    const participants = [];
-                    for (const doc of snapshot.docs) {
-                        const data = doc.data();
-                        // Fetch user info
-                        try {
-                            const userDoc = await db.collection("Users").doc(data.userId).get();
-                            const userData = userDoc.exists ? userDoc.data() : {};
-                            participants.push({
-                                id: doc.id,
-                                ...data,
-                                displayName: userData.displayName || "Anonim",
-                                email: userData.email || "",
-                            });
-                        } catch {
-                            participants.push({
-                                id: doc.id,
-                                ...data,
-                                displayName: "Anonim",
-                                email: "",
-                            });
+                    // Collect all unique userIds that are NOT already cached
+                    const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    const uniqueIds = [...new Set(docs.map(d => d.userId))];
+                    const uncachedIds = uniqueIds.filter(uid => !this._userCache[uid]);
+
+                    // Batch-fetch uncached users in parallel
+                    if (uncachedIds.length > 0) {
+                        const fetched = await Promise.all(
+                            uncachedIds.map(uid =>
+                                db.collection("Users").doc(uid).get().catch(() => null)
+                            )
+                        );
+                        for (const userDoc of fetched) {
+                            if (userDoc && userDoc.exists) {
+                                const d = userDoc.data();
+                                this._userCache[userDoc.id] = {
+                                    displayName: d.displayName || "Anonim",
+                                    email: d.email || "",
+                                };
+                            } else if (userDoc) {
+                                this._userCache[userDoc.id] = { displayName: "Anonim", email: "" };
+                            }
                         }
                     }
-                    this.participants = participants;
+
+                    // Build participant list from cache
+                    this.participants = docs.map(d => {
+                        const cached = this._userCache[d.userId] || { displayName: "Anonim", email: "" };
+                        return {
+                            id: d.id,
+                            ...d,
+                            displayName: cached.displayName,
+                            email: cached.email,
+                        };
+                    });
                 }, (error) => {
                     console.error("Participants listener hatası:", error);
                 });
@@ -340,6 +357,7 @@ function app() {
                 this._pastSessionsListener();
                 this._pastSessionsListener = null;
             }
+            this._lastCheckedSessionId = null;
         },
 
         // ═══════════════════════════════════════════════════════════

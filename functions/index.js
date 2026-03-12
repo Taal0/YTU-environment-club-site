@@ -69,6 +69,56 @@ exports.setDeviceId = onCall(async (request) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
+// bootstrapAuth - Boot sırasında kullanıcı/rol doğrulama (Gen 2)
+// ═══════════════════════════════════════════════════════════════
+exports.bootstrapAuth = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Giriş yapmanız gerekiyor.");
+  }
+
+  const uid = request.auth.uid;
+  const email = (request.auth.token.email || "").toLowerCase().trim();
+  const displayName = request.auth.token.name || "Anonim";
+  const role = isAdminEmail(email) ? "admin" : "user";
+  const userRef = db.collection("Users").doc(uid);
+
+  await db.runTransaction(async (transaction) => {
+    const userSnap = await transaction.get(userRef);
+
+    if (!userSnap.exists) {
+      transaction.set(userRef, {
+        email,
+        displayName,
+        role,
+        totalParticipations: 0,
+      });
+      return;
+    }
+
+    const existing = userSnap.data() || {};
+    const patch = {
+      email,
+      displayName: existing.displayName || displayName,
+      role,
+    };
+
+    if (typeof existing.totalParticipations !== "number") {
+      patch.totalParticipations = 0;
+    }
+
+    transaction.set(userRef, patch, { merge: true });
+  });
+
+  return {
+    ok: true,
+    uid,
+    email,
+    role,
+    isAdmin: role === "admin",
+  };
+});
+
+// ═══════════════════════════════════════════════════════════════
 // joinSession - Kullanıcı Katılım Cloud Function (Gen 2)
 // ═══════════════════════════════════════════════════════════════
 exports.joinSession = onCall(async (request) => {
