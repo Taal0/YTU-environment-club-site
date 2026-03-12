@@ -70,23 +70,35 @@ function app() {
         _userCache: {},
         _lastCheckedSessionId: null,
 
+        // Concurrency guard: incremented on every onAuthStateChanged call;
+        // each awaited step checks this to abort stale callbacks early.
+        _authGeneration: 0,
+        // Resolves when FingerprintJS + device ID is ready (non-blocking boot)
+        _deviceIdReady: null,
+
         // ─── Init ───
         async init() {
-            // Prepare device ID before anything else to ensure it's ready when the user logs in
-            await this.initDeviceId();
+            // Start device ID loading in the background — do NOT await here.
+            // This lets onAuthStateChanged register immediately, cutting ~400-1000ms off cold boot.
+            this._deviceIdReady = this.initDeviceId();
 
             // Listen for Firebase Auth state changes
             auth.onAuthStateChanged(async (user) => {
+                // Generation guard: stamp this invocation so any stale async chain
+                // from a previous auth state can detect it's obsolete and bail out.
+                const gen = ++this._authGeneration;
+
+                this.cleanupListeners();
                 this.authReady = false;
 
                 if (user) {
                     this.user = user;
                     this.isLoggedIn = true;
 
-                    // Resolve role + ensure Users/{uid} exists in a single backend call
+                    // ── Step 1: Resolve role via bootstrapAuth ──
                     try {
-                        const bootstrapAuth = functions.httpsCallable("bootstrapAuth");
-                        const result = await bootstrapAuth();
+                        const bootstrapAuthFn = functions.httpsCallable("bootstrapAuth");
+                        const result = await bootstrapAuthFn();
                         this.isAdmin = !!result?.data?.isAdmin;
                     } catch (error) {
                         console.error("Bootstrap auth hatası:", error);
@@ -94,16 +106,31 @@ function app() {
                         this.isAdmin = false;
                     }
 
-                    // Save device ID through Cloud Function (client has no direct write permission)
-                    await this.saveDeviceIdToUser();
+                    // Bail out if a newer auth event superseded us while we awaited above
+                    if (this._authGeneration !== gen) return;
 
-                    // Reset caches on login
+                    // ── Step 2: Device lock — participants only, skip for admins ──
+                    if (!this.isAdmin) {
+                        const deviceResult = await this.saveDeviceIdToUser();
+
+                        // Bail out again after this await
+                        if (this._authGeneration !== gen) return;
+
+                        if (deviceResult === "blocked") {
+                            // Device is locked to another account.
+                            // Sign out immediately — onAuthStateChanged(null) will set authReady = true.
+                            // The error toast stays visible for 4 s (showToast timeout) after login screen appears.
+                            this.showToast("Bu cihaz daha önce farklı bir hesapla kullanılmış. Her cihaz yalnızca bir hesapla katılabilir.", "error");
+                            if (this._authGeneration === gen) await auth.signOut();
+                            return;
+                        }
+                    }
+
+                    // ── Step 3: Start listeners ──
                     this._userCache = {};
                     this._lastCheckedSessionId = null;
 
-                    // Find and listen to the active session
                     this.listenForActiveSession();
-                    // Listen to past sessions
                     this.listenForPastSessions();
                 } else {
                     this.isLoggedIn = false;
@@ -113,7 +140,6 @@ function app() {
                     this.currentSessionId = null;
                     this._userCache = {};
                     this._lastCheckedSessionId = null;
-                    this.cleanupListeners();
                 }
 
                 this.authReady = true;
@@ -191,21 +217,25 @@ function app() {
             }
         },
 
+        // Returns: "ok" | "blocked" | "error"
+        // Never calls auth.signOut() — caller decides what to do with the result.
         async saveDeviceIdToUser() {
-            if (!this.deviceId || !auth.currentUser) return;
+            // Wait for device ID to be ready (resolves instantly if already done)
+            await this._deviceIdReady;
+
+            if (!this.deviceId || !auth.currentUser) return "error";
             try {
                 const setDeviceId = functions.httpsCallable("setDeviceId");
                 await setDeviceId({ deviceId: this.deviceId });
                 console.log("✅ Device ID Cloud Function ile kaydedildi.");
+                return "ok";
             } catch (error) {
                 const code = error?.code || "";
                 if (code.includes("already-exists")) {
-                    this.showToast("Bu cihaz daha önce farklı bir hesapla kullanılmış. Her cihaz yalnızca bir hesapla katılabilir.", "error");
-                    await new Promise(resolve => setTimeout(resolve, 3000)); // wait for the user to read the message
-                    await auth.signOut();
-                    return;
+                    return "blocked";
                 }
                 console.error("❌ Device ID kaydedilemedi:", error);
+                return "error";
             }
         },
 
@@ -249,6 +279,9 @@ function app() {
                         this.currentSession = null;
                         this.currentSessionId = null;
                         this.joinedCount = 0;
+                        // Oturum kapandı — katılım durumunu ve dedup key'i sıfırla
+                        this.userStatus = "idle";
+                        this._lastCheckedSessionId = null;
                     }
                 }, (error) => {
                     console.error("Session listener hatası:", error);

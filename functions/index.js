@@ -17,7 +17,6 @@ function isAdminEmail(email) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════════
 // onCreate - Kullanıcı İlk Giriş Yaptığında Veritabanına Ekleme
 // ═══════════════════════════════════════════════════════════════
 exports.createUserRecord = functions.auth.user().onCreate(async (user) => {
@@ -169,26 +168,38 @@ exports.joinSession = onCall(async (request) => {
 
   // 4. Hile kontrolü (Cihaz kontrolü geçici olarak kaldırıldı, sadece tek hesap = 1 katılım)
 
-  // 5. Aynı kullanıcı kontrolü
-  const userCheck = await participationsRef
-    .where("sessionId", "==", sessionId)
-    .where("userId", "==", userId)
-    .limit(1)
-    .get();
+  // 5. Transaction - Atomik İşlem
+  // Deterministic doc ID: sessionId_userId — transaction içinde okunup kontrol edilir;
+  // çift isteği sunucu tarafında atomik olarak engeller (race condition yok).
+  const participationRef = participationsRef.doc(`${sessionId}_${userId}`);
 
-  if (!userCheck.empty) {
-    throw new HttpsError(
-      "already-exists",
-      "Bu oturuma zaten katıldınız."
-    );
-  }
-
-  // 6. Transaction - Atomik İşlem
   try {
     await db.runTransaction(async (transaction) => {
-      const sessionSnap = await transaction.get(sessionRef);
+      const [sessionSnap, participationSnap, userSnap] = await Promise.all([
+        transaction.get(sessionRef),
+        transaction.get(participationRef),
+        transaction.get(userRef),
+      ]);
+
       const sessionData = sessionSnap.data();
-      const userSnap = await transaction.get(userRef);
+
+      // Oturum durumunu transaction içinde yeniden kontrol et (status değişmiş olabilir)
+      if (sessionData.status !== "active") {
+        const statusMessages = {
+          paused: "Bu oturum şu anda duraklatılmış.",
+          cancelled: "Bu oturum iptal edilmiş.",
+          completed: "Bu oturum sonuçlanmış.",
+        };
+        throw new HttpsError(
+          "failed-precondition",
+          statusMessages[sessionData.status] || "Bu oturum şu anda aktif değil."
+        );
+      }
+
+      // Çift katılım kontrolü (atomik — önceki Firestore sorgusu olmadan)
+      if (participationSnap.exists) {
+        throw new HttpsError("already-exists", "Bu oturuma zaten katıldınız.");
+      }
 
       if (sessionData.joinedCount >= sessionData.limit) {
         throw new HttpsError(
@@ -202,9 +213,8 @@ exports.joinSession = onCall(async (request) => {
         joinedCount: FieldValue.increment(1),
       });
 
-      // Participations kaydı oluştur
-      const newParticipationRef = participationsRef.doc();
-      transaction.set(newParticipationRef, {
+      // Participations kaydı oluştur (deterministic ID)
+      transaction.set(participationRef, {
         userId: userId,
         sessionId: sessionId,
         timestamp: FieldValue.serverTimestamp(),
@@ -269,7 +279,20 @@ exports.drawWinner = onCall(async (request) => {
     );
   }
 
-  // 3. Oturuma ait tüm katılımları getir
+  // 3. Oturum durumunu kontrol et — tamamlanmış/iptal oturumda tekrar çekiliş yapılmasını engelle
+  const sessionSnap = await db.collection("Sessions").doc(sessionId).get();
+  if (!sessionSnap.exists) {
+    throw new HttpsError("not-found", "Oturum bulunamadı.");
+  }
+  const sessionStatus = sessionSnap.data().status;
+  if (sessionStatus !== "active" && sessionStatus !== "paused") {
+    throw new HttpsError(
+      "failed-precondition",
+      "Bu oturum zaten sonuçlanmış veya iptal edilmiş."
+    );
+  }
+
+  // 4. Oturuma ait tüm katılımları getir
   const participationsSnap = await db
     .collection("Participations")
     .where("sessionId", "==", sessionId)
@@ -282,15 +305,15 @@ exports.drawWinner = onCall(async (request) => {
     );
   }
 
-  // 4. Benzersiz kullanıcı ID'lerini topla
+  // 5. Benzersiz kullanıcı ID'lerini topla
   const userIds = [...new Set(participationsSnap.docs.map((doc) => doc.data().userId))];
 
-  // 5. Her kullanıcının totalParticipations bilgisini al
+  // 6. Her kullanıcının totalParticipations bilgisini al
   const userDocs = await Promise.all(
     userIds.map((uid) => db.collection("Users").doc(uid).get())
   );
 
-  // 6. Ağırlıklı Havuz oluştur
+  // 7. Ağırlıklı Havuz oluştur
   const weightedPool = [];
   const participantDetails = {};
 
@@ -317,12 +340,12 @@ exports.drawWinner = onCall(async (request) => {
     );
   }
 
-  // 7. Rastgele kazanan seç
+  // 8. Rastgele kazanan seç
   const randomIndex = Math.floor(Math.random() * weightedPool.length);
   const winnerId = weightedPool[randomIndex];
   const winnerInfo = participantDetails[winnerId];
 
-  // 8. Session durumunu completed yap ve kazanan bilgisini kaydet
+  // 9. Session durumunu completed yap ve kazanan bilgisini kaydet
   await db.collection("Sessions").doc(sessionId).update({
     status: "completed",
     completedAt: FieldValue.serverTimestamp(),
