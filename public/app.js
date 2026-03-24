@@ -16,7 +16,7 @@ firebase.initializeApp(firebaseConfig);
 
 const auth = firebase.auth();
 const db = firebase.firestore();
-const functions = firebase.functions();
+const functions = firebase.app().functions("europe-west3");
 
 // ═══════════════════════════════════════════════════════════════
 // Local Emulator Connection (Only active when running on localhost or 127.0.0.1)
@@ -97,11 +97,24 @@ function app() {
                     this.user = user;
                     this.isLoggedIn = true;
 
-                    // ── Step 1: Resolve role via bootstrapAuth ──
+                    // ── Step 1+2: bootstrapAndRegisterDevice (tek çağrı) ──
+                    // Device ID'yi arka planda yükle (zaten initDeviceId ile başlatılmış)
+                    await this._deviceIdReady;
+
                     try {
-                        const bootstrapAuthFn = functions.httpsCallable("bootstrapAuth");
-                        const result = await bootstrapAuthFn();
+                        const bootstrapFn = functions.httpsCallable("bootstrapAndRegisterDevice");
+                        const result = await bootstrapFn({ deviceId: this.deviceId || null });
                         this.isAdmin = !!result?.data?.isAdmin;
+
+                        // Bail out if a newer auth event superseded us while we awaited above
+                        if (this._authGeneration !== gen) return;
+
+                        // Device blocked kontrolü
+                        if (result?.data?.deviceBlocked) {
+                            this.showToast("Bu cihaz daha önce farklı bir hesapla kullanılmış. Her cihaz yalnızca bir hesapla katılabilir.", "error");
+                            if (this._authGeneration === gen) await auth.signOut();
+                            return;
+                        }
                     } catch (error) {
                         console.error("Bootstrap auth hatası:", error);
                         this.showToast("Oturum bilgileri alınamadı, kullanıcı modu ile devam ediliyor.", "warning");
@@ -110,23 +123,6 @@ function app() {
 
                     // Bail out if a newer auth event superseded us while we awaited above
                     if (this._authGeneration !== gen) return;
-
-                    // ── Step 2: Device lock — participants only, skip for admins ──
-                    if (!this.isAdmin) {
-                        const deviceResult = await this.saveDeviceIdToUser();
-
-                        // Bail out again after this await
-                        if (this._authGeneration !== gen) return;
-
-                        if (deviceResult === "blocked") {
-                            // Device is locked to another account.
-                            // Sign out immediately — onAuthStateChanged(null) will set authReady = true.
-                            // The error toast stays visible for 4 s (showToast timeout) after login screen appears.
-                            this.showToast("Bu cihaz daha önce farklı bir hesapla kullanılmış. Her cihaz yalnızca bir hesapla katılabilir.", "error");
-                            if (this._authGeneration === gen) await auth.signOut();
-                            return;
-                        }
-                    }
 
                     // ── Step 3: Fetch user ticket count (non-admin only) ──
                     if (!this.isAdmin) {
@@ -228,28 +224,6 @@ function app() {
                     localStorage.setItem(KEY, id);
                 }
                 this.deviceId = id;
-            }
-        },
-
-        // Returns: "ok" | "blocked" | "error"
-        // Never calls auth.signOut() — caller decides what to do with the result.
-        async saveDeviceIdToUser() {
-            // Wait for device ID to be ready (resolves instantly if already done)
-            await this._deviceIdReady;
-
-            if (!this.deviceId || !auth.currentUser) return "error";
-            try {
-                const setDeviceId = functions.httpsCallable("setDeviceId");
-                await setDeviceId({ deviceId: this.deviceId });
-                console.log("✅ Device ID Cloud Function ile kaydedildi.");
-                return "ok";
-            } catch (error) {
-                const code = error?.code || "";
-                if (code.includes("already-exists")) {
-                    return "blocked";
-                }
-                console.error("❌ Device ID kaydedilemedi:", error);
-                return "error";
             }
         },
 
