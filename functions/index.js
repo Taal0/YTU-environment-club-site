@@ -40,7 +40,6 @@ exports.createUserRecord = functions.auth.user().onCreate(async (user) => {
 // ═══════════════════════════════════════════════════════════════
 exports.bootstrapAndRegisterDevice = onCall({
   region: REGION,
-  minInstances: 1,
   maxInstances: 50,
 }, async (request) => {
   if (!request.auth) {
@@ -136,7 +135,6 @@ exports.bootstrapAndRegisterDevice = onCall({
 // ═══════════════════════════════════════════════════════════════
 exports.joinSession = onCall({
   region: REGION,
-  minInstances: 1,
   maxInstances: 50,
 }, async (request) => {
   // 1. Auth kontrolü
