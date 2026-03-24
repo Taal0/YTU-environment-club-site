@@ -53,6 +53,8 @@ function app() {
         userStatus: "idle", // idle | joining | joined
         sessionLimit: 200,
         sessionPrize: "",
+        sessionMinParticipation: 0,
+        userTotalParticipations: 0,
         participants: [],
         toasts: [],
         pastSessions: [],
@@ -126,7 +128,19 @@ function app() {
                         }
                     }
 
-                    // ── Step 3: Start listeners ──
+                    // ── Step 3: Fetch user ticket count (non-admin only) ──
+                    if (!this.isAdmin) {
+                        try {
+                            const userDoc = await db.collection("Users").doc(user.uid).get();
+                            if (this._authGeneration !== gen) return;
+                            this.userTotalParticipations = userDoc.exists ? (userDoc.data().totalParticipations || 0) : 0;
+                        } catch (e) {
+                            console.warn("Bilet sayısı alınamadı:", e);
+                            this.userTotalParticipations = 0;
+                        }
+                    }
+
+                    // ── Step 4: Start listeners ──
                     this._userCache = {};
                     this._lastCheckedSessionId = null;
 
@@ -410,6 +424,7 @@ function app() {
                 });
 
                 this.userStatus = "joined";
+                this.userTotalParticipations++;
                 this.showToast(result.data.message, "success");
             } catch (error) {
                 this.userStatus = "idle";
@@ -436,14 +451,17 @@ function app() {
             }
 
             try {
+                const minP = parseInt(this.sessionMinParticipation) || 0;
                 await db.collection("Sessions").add({
                     status: "active",
                     limit: limit,
                     prize: this.sessionPrize || "",
+                    minParticipation: minP,
                     joinedCount: 0,
                     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                 });
                 this.sessionPrize = ""; // Clear after starting
+                this.sessionMinParticipation = 0; // Clear after starting
                 this.showToast(`${limit} kişilik oturum başlatıldı!`, "success");
             } catch (error) {
                 this.showToast("Oturum oluşturulamadı: " + error.message, "error");

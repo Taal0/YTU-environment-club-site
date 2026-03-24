@@ -430,7 +430,7 @@
                 <!-- KATIL Butonu -->
                 <div class="flex justify-center">
                     <button @click="joinCurrentSession()"
-                        :disabled="userStatus === 'joined' || userStatus === 'joining' || joinedCount >= (currentSession?.limit || 0) || currentSession?.status !== 'active'"
+                        :disabled="userStatus === 'joined' || userStatus === 'joining' || joinedCount >= (currentSession?.limit || 0) || currentSession?.status !== 'active' || (currentSession?.minParticipation > 0 && userTotalParticipations < currentSession?.minParticipation)"
                         class="join-btn rounded-3xl px-16 py-6 text-white font-display font-bold text-2xl shadow-2xl animate-glow"
                         :class="{ 'animate-glow': userStatus !== 'joined' }" id="btn-join">
                         <span x-show="userStatus === 'idle'">🎯 KATIL</span>
@@ -458,6 +458,17 @@
                     class="glass-card-light rounded-2xl p-6 text-center animate-slide-up">
                     <p class="text-green-400 font-semibold text-lg">🎉 Çekilişe başarıyla katıldınız!</p>
                     <p class="text-gray-400 text-sm mt-1">Kazanan açıklanana kadar bekleyin. İyi şanslar!</p>
+                </div>
+
+                <!-- Bilet şartı uyarısı -->
+                <div x-show="currentSession?.minParticipation > 0 && userTotalParticipations < currentSession?.minParticipation && userStatus !== 'joined'"
+                    class="glass-card-light rounded-2xl p-5 text-center animate-slide-up border border-amber-500/20">
+                    <p class="text-amber-400 font-semibold text-lg">🎫 Bilet Şartı Sağlanmıyor</p>
+                    <p class="text-gray-400 text-sm mt-1">
+                        Bu çekilişe katılmak için en az
+                        <span class="text-white font-bold" x-text="currentSession?.minParticipation"></span> biletiniz olmalı.
+                        Mevcut biletiniz: <span class="text-white font-bold" x-text="userTotalParticipations"></span>
+                    </p>
                 </div>
             </div>
         </div>
@@ -496,8 +507,13 @@
                             
                             <label class="text-sm text-gray-400 font-medium mb-1 block">Hediye (Opsiyonel)</label>
                             <input type="text" x-model="sessionPrize"
-                                class="w-full bg-gray-900/50 border border-gray-700 rounded-xl px-4 py-3 text-white focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/20 transition-all"
+                                class="w-full bg-gray-900/50 border border-gray-700 rounded-xl px-4 py-3 text-white focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/20 transition-all mb-3"
                                 placeholder="Örn: 1 Aylık Netflix veya 200 TL Çek" id="input-session-prize">
+                            
+                            <label class="text-sm text-gray-400 font-medium mb-1 block">Minimum Bilet Şartı</label>
+                            <input type="number" x-model.number="sessionMinParticipation"
+                                class="w-full bg-gray-900/50 border border-gray-700 rounded-xl px-4 py-3 text-white focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/20 transition-all"
+                                placeholder="0 = şart yok" min="0" max="100" id="input-min-participation">
                         </div>
                         <button @click="createSession()"
                             class="admin-btn w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white rounded-xl px-6 py-3 font-semibold shadow-lg"
@@ -539,6 +555,10 @@
                             <div class="flex justify-between text-sm pt-2 border-t border-gray-700/50" x-show="currentSession?.prize">
                                 <span class="text-accent-400 font-medium">Hediye:</span>
                                 <span class="text-white font-medium" x-text="currentSession?.prize"></span>
+                            </div>
+                            <div class="flex justify-between text-sm" x-show="currentSession?.minParticipation > 0">
+                                <span class="text-amber-400 font-medium">Min Bilet:</span>
+                                <span class="text-white font-medium" x-text="currentSession?.minParticipation"></span>
                             </div>
                         </div>
 
