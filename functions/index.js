@@ -6,6 +6,8 @@ const { FieldValue } = require("firebase-admin/firestore");
 admin.initializeApp();
 const db = admin.firestore();
 
+const REGION = "europe-west3";
+
 const ADMIN_EMAILS = [
   "talatozdemir00@gmail.com",
   "mert.ytucev@gmail.com",
@@ -33,44 +35,14 @@ exports.createUserRecord = functions.auth.user().onCreate(async (user) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// setDeviceId - Kullanıcının cihaz ID bilgisini güvenli şekilde kaydet (Gen 2)
+// bootstrapAndRegisterDevice - Boot sırasında kullanıcı/rol doğrulama
+// + cihaz kilidini tek çağrıda yap (Gen 2)
 // ═══════════════════════════════════════════════════════════════
-exports.setDeviceId = onCall(async (request) => {
-  if (!request.auth) {
-    throw new HttpsError("unauthenticated", "Giriş yapmanız gerekiyor.");
-  }
-
-  const { deviceId } = request.data || {};
-  if (typeof deviceId !== "string" || deviceId.length < 8 || deviceId.length > 128) {
-    throw new HttpsError("invalid-argument", "Geçersiz deviceId.");
-  }
-
-  const uid = request.auth.uid;
-  const userRef = db.collection("Users").doc(uid);
-  const lockRef = db.collection("DeviceLocks").doc(deviceId);
-
-  await db.runTransaction(async (tx) => {
-    const lockSnap = await tx.get(lockRef);
-
-    if (!lockSnap.exists) {
-      tx.set(lockRef, { uid });
-    } else if (lockSnap.data().uid !== uid) {
-      throw new HttpsError(
-        "already-exists",
-        "Bu cihaz daha önce farklı bir hesapla kullanılmış. Her cihaz yalnızca bir hesapla katılabilir."
-      );
-    }
-
-    tx.set(userRef, { deviceId }, { merge: true });
-  });
-
-  return { success: true };
-});
-
-// ═══════════════════════════════════════════════════════════════
-// bootstrapAuth - Boot sırasında kullanıcı/rol doğrulama (Gen 2)
-// ═══════════════════════════════════════════════════════════════
-exports.bootstrapAuth = onCall(async (request) => {
+exports.bootstrapAndRegisterDevice = onCall({
+  region: REGION,
+  minInstances: 1,
+  maxInstances: 50,
+}, async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Giriş yapmanız gerekiyor.");
   }
@@ -79,8 +51,10 @@ exports.bootstrapAuth = onCall(async (request) => {
   const email = (request.auth.token.email || "").toLowerCase().trim();
   const displayName = request.auth.token.name || "Anonim";
   const role = isAdminEmail(email) ? "admin" : "user";
+  const isAdmin = role === "admin";
   const userRef = db.collection("Users").doc(uid);
 
+  // ── Step 1: bootstrapAuth — kullanıcı dokümanını oluştur/güncelle ──
   await db.runTransaction(async (transaction) => {
     const userSnap = await transaction.get(userRef);
 
@@ -108,19 +82,63 @@ exports.bootstrapAuth = onCall(async (request) => {
     transaction.set(userRef, patch, { merge: true });
   });
 
+  // ── Step 2: setDeviceId — admin değilse cihaz kilidini kontrol et ──
+  const { deviceId } = request.data || {};
+  let deviceBlocked = false;
+
+  if (!isAdmin && deviceId) {
+    if (typeof deviceId !== "string" || deviceId.length < 8 || deviceId.length > 128) {
+      throw new HttpsError("invalid-argument", "Geçersiz deviceId.");
+    }
+
+    const lockRef = db.collection("DeviceLocks").doc(deviceId);
+
+    try {
+      await db.runTransaction(async (tx) => {
+        const lockSnap = await tx.get(lockRef);
+
+        if (!lockSnap.exists) {
+          tx.set(lockRef, { uid });
+        } else if (lockSnap.data().uid !== uid) {
+          throw new HttpsError(
+            "already-exists",
+            "Bu cihaz daha önce farklı bir hesapla kullanılmış. Her cihaz yalnızca bir hesapla katılabilir."
+          );
+        }
+
+        tx.set(userRef, { deviceId }, { merge: true });
+      });
+    } catch (error) {
+      if (error instanceof HttpsError && error.code === "already-exists") {
+        deviceBlocked = true;
+      } else if (error instanceof HttpsError) {
+        throw error;
+      } else {
+        console.error("Device lock hatası:", error);
+        // Device lock hatasını yutma — giriş yapabilsin ama device blocked olarak işaretle
+        deviceBlocked = true;
+      }
+    }
+  }
+
   return {
     ok: true,
     uid,
     email,
     role,
-    isAdmin: role === "admin",
+    isAdmin,
+    deviceBlocked,
   };
 });
 
 // ═══════════════════════════════════════════════════════════════
 // joinSession - Kullanıcı Katılım Cloud Function (Gen 2)
 // ═══════════════════════════════════════════════════════════════
-exports.joinSession = onCall(async (request) => {
+exports.joinSession = onCall({
+  region: REGION,
+  minInstances: 1,
+  maxInstances: 50,
+}, async (request) => {
   // 1. Auth kontrolü
   if (!request.auth) {
     throw new HttpsError(
@@ -144,7 +162,7 @@ exports.joinSession = onCall(async (request) => {
   const participationsRef = db.collection("Participations");
   const userRef = db.collection("Users").doc(userId);
 
-  // 3. Oturum durumu kontrolü
+  // 3. Oturum durumu kontrolü (transaction öncesi hızlı kontrol)
   const sessionDoc = await sessionRef.get();
   if (!sessionDoc.exists) {
     throw new HttpsError(
@@ -166,9 +184,8 @@ exports.joinSession = onCall(async (request) => {
     );
   }
 
-  // 4. Hile kontrolü (Cihaz kontrolü geçici olarak kaldırıldı, sadece tek hesap = 1 katılım)
-
-  // 5. Transaction - Atomik İşlem
+  // 4. Transaction - Atomik İşlem
+  // joinedCount artırma transaction DIŞINDA yapılacak (contention azaltma).
   // Deterministic doc ID: sessionId_userId — transaction içinde okunup kontrol edilir;
   // çift isteği sunucu tarafında atomik olarak engeller (race condition yok).
   const participationRef = participationsRef.doc(`${sessionId}_${userId}`);
@@ -220,10 +237,8 @@ exports.joinSession = onCall(async (request) => {
         );
       }
 
-      // joinedCount artır
-      transaction.update(sessionRef, {
-        joinedCount: FieldValue.increment(1),
-      });
+      // ── Transaction içinde: sadece participationRef ve userRef yazılır ──
+      // joinedCount artırma transaction DIŞINDA yapılır (contention azaltma)
 
       // Participations kaydı oluştur (deterministic ID)
       transaction.set(participationRef, {
@@ -232,21 +247,29 @@ exports.joinSession = onCall(async (request) => {
         timestamp: FieldValue.serverTimestamp(),
       });
 
-      // Users tablosunu güncelle veya oluştur (Race condition önlemi)
+      // Users tablosunu güncelle veya oluştur
       if (userSnap.exists) {
         transaction.update(userRef, {
           totalParticipations: FieldValue.increment(1),
         });
       } else {
-        const authUser = await admin.auth().getUser(userId);
+        // Fix 4: request.auth.token'dan al, admin.auth().getUser() çağrısını kaldır
+        const email = request.auth.token.email || "";
+        const displayName = request.auth.token.name || "Anonim";
         transaction.set(userRef, {
-          email: authUser.email || "",
-          displayName: authUser.displayName || "Anonim",
-          role: isAdminEmail(authUser.email) ? "admin" : "user",
+          email: email,
+          displayName: displayName,
+          role: isAdminEmail(email) ? "admin" : "user",
           totalParticipations: 1,
           createdAt: FieldValue.serverTimestamp(),
         });
       }
+    });
+
+    // Fix 1: joinedCount artırma — transaction DIŞINDA, non-transactional atomik increment
+    // Bu sayede 500 eşzamanlı kullanıcı session doc üzerinde contention yaratmaz.
+    await sessionRef.update({
+      joinedCount: FieldValue.increment(1),
     });
 
     return { success: true, message: "Başarıyla katıldınız!" };
@@ -265,7 +288,10 @@ exports.joinSession = onCall(async (request) => {
 // ═══════════════════════════════════════════════════════════════
 // drawWinner - Ağırlıklı Çekiliş Cloud Function (Gen 2)
 // ═══════════════════════════════════════════════════════════════
-exports.drawWinner = onCall(async (request) => {
+exports.drawWinner = onCall({
+  region: REGION,
+  maxInstances: 10,
+}, async (request) => {
   // 1. Auth kontrolü
   if (!request.auth) {
     throw new HttpsError(
@@ -381,7 +407,11 @@ exports.drawWinner = onCall(async (request) => {
 // ═══════════════════════════════════════════════════════════════
 // cancelSession - Oturumu İptal Et ve Hakları Geri Ver (Gen 2)
 // ═══════════════════════════════════════════════════════════════
-exports.cancelSession = onCall(async (request) => {
+exports.cancelSession = onCall({
+  region: REGION,
+  maxInstances: 10,
+  timeoutSeconds: 120,
+}, async (request) => {
   // 1. Auth kontrolü
   if (!request.auth) {
     throw new HttpsError(
