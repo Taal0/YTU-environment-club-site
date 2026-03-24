@@ -201,6 +201,18 @@ exports.joinSession = onCall(async (request) => {
         throw new HttpsError("already-exists", "Bu oturuma zaten katıldınız.");
       }
 
+      // Minimum katılım şartı kontrolü
+      const minReq = sessionData.minParticipation || 0;
+      if (minReq > 0) {
+        const currentTickets = (userSnap.exists ? userSnap.data().totalParticipations : 0) || 0;
+        if (currentTickets < minReq) {
+          throw new HttpsError(
+            "failed-precondition",
+            `Bu çekilişe katılmak için en az ${minReq} önceki katılımınız olmalı. Mevcut: ${currentTickets}`
+          );
+        }
+      }
+
       if (sessionData.joinedCount >= sessionData.limit) {
         throw new HttpsError(
           "resource-exhausted",

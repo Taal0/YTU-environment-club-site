@@ -49,3 +49,8 @@ jspm_packages/
 .DS_Store
 Thumbs.db
 
+# K6 load test runtime data
+test_scripts/
+test_scripts/data/
+test_scripts/node_modules/
+
